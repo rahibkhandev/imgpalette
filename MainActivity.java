@@ -22,7 +22,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.Manifest;
-
 import java.io.FileOutputStream;
 
 public class MainActivity extends AppCompatActivity {
@@ -31,9 +30,10 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> fileUploadCallback;
     private static final int FILE_CHOOSER_REQUEST = 1;
     private static final int STORAGE_PERMISSION_REQUEST = 2;
-    private static final String SITE_URL = "https://palettesnap-six.vercel.app/";
 
-    // Store pending base64 data while waiting for permission
+    // ✅ Load from local assets — works offline!
+    private static final String SITE_URL = "file:///android_asset/index.html";
+
     private String pendingBase64Url = null;
 
     @Override
@@ -53,6 +53,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setDisplayZoomControls(false);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+
+        // ✅ Allow local file access for offline mode
+        settings.setAllowFileAccessFromFileURLs(true);
+        settings.setAllowUniversalAccessFromFileURLs(true);
 
         // Keep links inside app
         webView.setWebViewClient(new WebViewClient());
@@ -84,13 +88,10 @@ public class MainActivity extends AppCompatActivity {
         // Handle download button
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             if (url.startsWith("data:image")) {
-                // Check and request permission first
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                    // Android 9 and below needs permission
                     if (ContextCompat.checkSelfPermission(this,
                             Manifest.permission.WRITE_EXTERNAL_STORAGE)
                             != PackageManager.PERMISSION_GRANTED) {
-                        // Save URL and request permission
                         pendingBase64Url = url;
                         ActivityCompat.requestPermissions(this,
                                 new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
@@ -98,24 +99,22 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
                 }
-                // Android 10+ doesn't need permission — save directly
                 saveBase64Image(url);
             }
         });
 
+        // ✅ Load local HTML file
         webView.loadUrl(SITE_URL);
     }
 
-    // Called after user allows or denies permission
+    // Permission result handler
     @Override
     public void onRequestPermissionsResult(int requestCode,
                                            String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
         if (requestCode == STORAGE_PERMISSION_REQUEST) {
             if (grantResults.length > 0
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // Permission granted — save the pending image
                 if (pendingBase64Url != null) {
                     saveBase64Image(pendingBase64Url);
                     pendingBase64Url = null;
@@ -132,15 +131,12 @@ public class MainActivity extends AppCompatActivity {
     private void saveBase64Image(String base64Url) {
         new Thread(() -> {
             try {
-                // Decode base64 to bitmap
                 String base64Data = base64Url.substring(base64Url.indexOf(",") + 1);
                 byte[] imageBytes = Base64.decode(base64Data, Base64.DEFAULT);
                 Bitmap bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
-
                 String fileName = "palettesnap-" + System.currentTimeMillis() + ".png";
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // Android 10+ — use MediaStore (no permission needed)
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
                     values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
@@ -164,9 +160,7 @@ public class MainActivity extends AppCompatActivity {
                                 "✅ Palette saved to Downloads & Gallery!",
                                 Toast.LENGTH_LONG).show());
                     }
-
                 } else {
-                    // Android 9 and below
                     java.io.File downloadsDir = Environment
                             .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                     java.io.File file = new java.io.File(downloadsDir, fileName);
@@ -175,16 +169,14 @@ public class MainActivity extends AppCompatActivity {
                     fos.flush();
                     fos.close();
 
-                    // Scan file so it appears in Gallery
                     Intent scanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
                     scanIntent.setData(Uri.fromFile(file));
                     sendBroadcast(scanIntent);
 
                     runOnUiThread(() -> Toast.makeText(this,
-                            "✅ Palette saved to Downloads !",
+                            "✅ Palette saved to Downloads & Gallery!",
                             Toast.LENGTH_LONG).show());
                 }
-
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(this,
                         "❌ Save failed: " + e.getMessage(),
@@ -197,7 +189,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-
         if (requestCode == FILE_CHOOSER_REQUEST) {
             if (fileUploadCallback == null) return;
             Uri[] results = null;
@@ -212,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Back button navigates inside webview
+    // Back button
     @Override
     public void onBackPressed() {
         if (webView.canGoBack()) {
